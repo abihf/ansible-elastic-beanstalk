@@ -348,47 +348,46 @@ def main():
 
     if state == 'present':
         try:
-            tags_to_apply = [ {'Key':k,'Value':v} for k,v in tags.iteritems()]
-            ebs.create_environment(**filter_empty(ApplicationName=app_name,
-                                                  EnvironmentName=env_name,
-                                                  VersionLabel=version_label,
-                                                  TemplateName=template_name,
-                                                  Tags=tags_to_apply,
-                                                  SolutionStackName=solution_stack_name,
-                                                  CNAMEPrefix=cname_prefix,
-                                                  Description=description,
-                                                  OptionSettings=option_settings,
-                                                  Tier={'Name':tier_name, 'Type':tier_type, 'Version':'1.0'}))
+            env = describe_env(ebs, app_name, env_name, [])
+            if env is None:
+                tags_to_apply = [ {'Key':k,'Value':v} for k,v in tags.iteritems()]
+                ebs.create_environment(**filter_empty(ApplicationName=app_name,
+                                                      EnvironmentName=env_name,
+                                                      VersionLabel=version_label,
+                                                      TemplateName=template_name,
+                                                      Tags=tags_to_apply,
+                                                      SolutionStackName=solution_stack_name,
+                                                      CNAMEPrefix=cname_prefix,
+                                                      Description=description,
+                                                      OptionSettings=option_settings,
+                                                      Tier={'Name':tier_name, 'Type':tier_type, 'Version':'1.0'}))
 
-            env = wait_for(ebs, app_name, env_name, wait_timeout, status_is_ready)
-            result = dict(changed=True, env=env)
+                env = wait_for(ebs, app_name, env_name, wait_timeout, status_is_ready)
+                result = dict(changed=True, env=env)
+
+            else:
+                updates = update_required(ebs, env, module.params)
+                if len(updates) > 0:
+                    ebs.update_environment(**filter_empty(
+                                           EnvironmentName=env_name,
+                                           VersionLabel=version_label,
+                                           TemplateName=template_name,
+                                           Description=description,
+                                           OptionSettings=option_settings))
+
+                    env = wait_for(ebs, app_name, env_name, wait_timeout,
+                             lambda environment: status_is_ready(environment) and
+                               version_is_updated(version_label, environment))
+
+                    result = dict(changed=True, env=env, updates=updates)
+                else:
+                    result = dict(changed=False, env=env)
+
         except ClientError, e:
             if 'Environment %s already exists' % env_name in e.message:
                 update = True
             else:
                 module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
-
-    if update:
-        try:
-            env = describe_env(ebs, app_name, env_name, [])
-            updates = update_required(ebs, env, module.params)
-            if len(updates) > 0:
-                ebs.update_environment(**filter_empty(
-                                       EnvironmentName=env_name,
-                                       VersionLabel=version_label,
-                                       TemplateName=template_name,
-                                       Description=description,
-                                       OptionSettings=option_settings))
-
-                env = wait_for(ebs, app_name, env_name, wait_timeout,
-                         lambda environment: status_is_ready(environment) and
-                           version_is_updated(version_label, environment))
-
-                result = dict(changed=True, env=env, updates=updates)
-            else:
-                result = dict(changed=False, env=env)
-        except ClientError, e:
-            module.fail_json(msg=e.message, **camel_dict_to_snake_dict(e.response))
 
     if state == 'absent':
         try:
